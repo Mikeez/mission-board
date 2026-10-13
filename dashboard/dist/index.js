@@ -1,5 +1,5 @@
 // ~/.hermes/plugins/mission-board/dashboard/dist/index.js
-// Mission Board — unified daily dashboard: calendar + to-dos + Kanban cards.
+// Mission Board — unified daily dashboard, Kanban-style columns.
 // Plain IIFE, no build step. Uses the Hermes Dashboard Plugin SDK only.
 (function () {
   "use strict";
@@ -7,16 +7,8 @@
   const SDK = window.__HERMES_PLUGIN_SDK__;
   const { React } = SDK;
   const { useState, useEffect, useCallback } = SDK.hooks;
-  const {
-    Card,
-    CardHeader,
-    CardTitle,
-    CardContent,
-    Badge,
-    Button,
-    Separator,
-  } = SDK.components;
-  const { cn, isoTimeAgo } = SDK.utils;
+  const { Card, CardHeader, CardTitle, CardContent, Badge, Button } = SDK.components;
+  const { cn, timeAgo } = SDK.utils;
   const h = React.createElement;
 
   const REFRESH_MS = 60000;
@@ -46,17 +38,7 @@
     return { data, error, loading, reload: () => load(true) };
   }
 
-  function SectionTitle({ icon, children, count }) {
-    return h(
-      "div",
-      { className: "flex items-center gap-2 mb-2" },
-      h("span", { className: "text-base" }, icon),
-      h("span", { className: "font-medium text-sm" }, children),
-      count != null
-        ? h(Badge, { className: "ml-1" }, String(count))
-        : null
-    );
-  }
+  // --- Needs-input banner -------------------------------------------------
 
   function NeedsInputBanner({ snapshot }) {
     const count = snapshot && snapshot.needs_input_count;
@@ -91,139 +73,180 @@
           h(
             "div",
             { key: t.text, className: "flex items-center justify-between" },
-            h("span", null, "⏳ ", t.text),
-            h(Badge, { className: "ml-2" }, Math.round(t.age_days) + "d old")
+            h("span", null, t.overdue ? "🔴 " : "⏳ ", t.text),
+            h(
+              Badge,
+              { className: "ml-2", variant: t.overdue ? "destructive" : "secondary" },
+              t.overdue
+                ? Math.abs(t.days_until_due) + "d overdue"
+                : Math.round(t.age_days) + "d old"
+            )
           )
         )
       )
     );
   }
 
-  function CalendarCard({ events }) {
-    const list = Array.isArray(events) ? events : [];
-    const errorItem = list.find((e) => e && e.error);
+  // --- Generic board column ------------------------------------------------
+
+  function BoardColumn({ title, icon, count, children, emptyText }) {
     return h(
-      Card,
-      null,
-      h(CardHeader, { className: "py-3" }, h(SectionTitle, { icon: "📅", count: errorItem ? null : list.length }, "Calendar (next 3 days)")),
+      "div",
+      { className: "flex flex-col gap-2 min-w-[260px] flex-1" },
       h(
-        CardContent,
-        { className: "text-sm space-y-1 pt-0" },
-        errorItem
-          ? h("div", { className: "text-muted-foreground" }, errorItem.error)
-          : list.length === 0
-          ? h("div", { className: "text-muted-foreground" }, "No events today")
-          : list.map((e, i) =>
-              h(
-                "div",
-                { key: i, className: "flex flex-col border-b border-border/40 pb-1 last:border-0" },
-                h("span", { className: "font-medium" }, e.summary || e.title || "(untitled)"),
-                h(
-                  "span",
-                  { className: "text-xs text-muted-foreground" },
-                  (e.start && (e.start.dateTime || e.start.date)) || ""
-                )
-              )
-            )
+        "div",
+        { className: "flex items-center gap-2 px-1" },
+        h("span", null, icon),
+        h("span", { className: "font-medium text-sm" }, title),
+        count != null ? h(Badge, { className: "ml-auto" }, String(count)) : null
+      ),
+      h(
+        "div",
+        { className: "flex flex-col gap-2 bg-muted/30 rounded-lg p-2 min-h-[120px]" },
+        React.Children.count(children) === 0
+          ? h("div", { className: "text-xs text-muted-foreground p-2" }, emptyText)
+          : children
       )
     );
   }
 
-  function TodosCard({ todos }) {
+  function BoardCardShell({ children, highlight }) {
+    return h(
+      Card,
+      { className: cn("shadow-sm", highlight && "border-destructive/50") },
+      h(CardContent, { className: "p-3 text-sm space-y-1" }, children)
+    );
+  }
+
+  // --- To-Dos column --------------------------------------------------------
+
+  function TodoCard({ todo }) {
+    const highlight = todo.overdue || todo.stale;
+    return h(
+      BoardCardShell,
+      { highlight },
+      h("div", { className: "font-medium" }, todo.text),
+      h(
+        "div",
+        { className: "flex items-center gap-2 flex-wrap" },
+        h(Badge, { variant: "secondary" }, todo.section),
+        todo.due_date
+          ? h(
+              Badge,
+              { variant: todo.overdue ? "destructive" : "default" },
+              todo.overdue
+                ? Math.abs(todo.days_until_due) + "d overdue"
+                : "due " + todo.due_date
+            )
+          : null,
+        !todo.due_date && todo.stale
+          ? h(Badge, { variant: "destructive" }, Math.round(todo.age_days) + "d old")
+          : null
+      )
+    );
+  }
+
+  function TodosColumn({ todos }) {
     const list = Array.isArray(todos) ? todos : [];
     const errorItem = list.find((t) => t && t.error);
+    if (errorItem) {
+      return h(BoardColumn, { title: "Open To-Dos", icon: "✅", emptyText: "" },
+        h(BoardCardShell, { highlight: true }, errorItem.error));
+    }
     return h(
-      Card,
+      BoardColumn,
+      { title: "Open To-Dos", icon: "✅", count: list.length, emptyText: "Nothing pending" },
+      list.map((t, i) => h(TodoCard, { key: i, todo: t }))
+    );
+  }
+
+  // --- Calendar column -------------------------------------------------------
+
+  function EventCard({ ev }) {
+    const start = (ev.start && (ev.start.dateTime || ev.start.date)) || ev.start || "";
+    return h(
+      BoardCardShell,
       null,
-      h(CardHeader, { className: "py-3" }, h(SectionTitle, { icon: "✅", count: errorItem ? null : list.length }, "Open To-Dos")),
+      h("div", { className: "font-medium" }, ev.summary || ev.title || "(untitled)"),
+      h("div", { className: "text-xs text-muted-foreground" }, start),
+      ev.location
+        ? h("div", { className: "text-xs text-muted-foreground" }, "📍 " + ev.location)
+        : null
+    );
+  }
+
+  function CalendarColumn({ events }) {
+    const list = Array.isArray(events) ? events : [];
+    const errorItem = list.find((e) => e && e.error);
+    if (errorItem) {
+      return h(BoardColumn, { title: "Calendar (next 3 days)", icon: "📅", emptyText: "" },
+        h(BoardCardShell, { highlight: true }, errorItem.error));
+    }
+    return h(
+      BoardColumn,
+      { title: "Calendar (next 3 days)", icon: "📅", count: list.length, emptyText: "No events" },
+      list.map((e, i) => h(EventCard, { key: i, ev: e }))
+    );
+  }
+
+  // --- Kanban column ---------------------------------------------------------
+
+  function KanbanCardItem({ card }) {
+    return h(
+      BoardCardShell,
+      { highlight: card.needs_input },
+      h("div", { className: "font-medium" }, card.needs_input ? "⚠️ " : "", card.title),
       h(
-        CardContent,
-        { className: "text-sm space-y-1 pt-0" },
-        errorItem
-          ? h("div", { className: "text-muted-foreground" }, errorItem.error)
-          : list.length === 0
-          ? h("div", { className: "text-muted-foreground" }, "Nothing pending")
-          : list.map((t, i) =>
-              h(
-                "div",
-                { key: i, className: "flex items-center justify-between border-b border-border/40 pb-1 last:border-0" },
-                h("span", null, t.text),
-                t.stale
-                  ? h(Badge, { variant: "destructive" }, Math.round(t.age_days) + "d")
-                  : h("span", { className: "text-xs text-muted-foreground" }, t.section)
-              )
-            )
+        "div",
+        { className: "flex items-center gap-2 flex-wrap" },
+        h(Badge, { variant: "secondary" }, card.board_profile),
+        h(Badge, { variant: card.needs_input ? "destructive" : "default" }, card.status),
+        card.assignee ? h(Badge, { variant: "outline" }, "@" + card.assignee) : null
       )
     );
   }
 
-  function KanbanCard({ kanban }) {
+  function KanbanColumn({ kanban }) {
     const list = Array.isArray(kanban) ? kanban : [];
-    const byStatus = {};
-    list.forEach((c) => {
-      byStatus[c.status] = (byStatus[c.status] || 0) + 1;
-    });
     return h(
-      Card,
-      null,
-      h(CardHeader, { className: "py-3" }, h(SectionTitle, { icon: "🗂️", count: list.length }, "Open Kanban Cards (all agents)")),
-      h(
-        CardContent,
-        { className: "text-sm space-y-1 pt-0" },
-        list.length === 0
-          ? h("div", { className: "text-muted-foreground" }, "Board is clear")
-          : list.map((c) =>
-              h(
-                "div",
-                { key: c.id, className: "flex items-center justify-between border-b border-border/40 pb-1 last:border-0" },
-                h(
-                  "span",
-                  { className: cn(c.needs_input && "font-medium") },
-                  c.needs_input ? "⚠️ " : "",
-                  c.title
-                ),
-                h(
-                  "div",
-                  { className: "flex items-center gap-1" },
-                  h(Badge, null, c.board_profile),
-                  h(Badge, { variant: c.needs_input ? "destructive" : "secondary" }, c.status)
-                )
-              )
-            )
-      )
+      BoardColumn,
+      { title: "Agent Kanban Cards", icon: "🗂️", count: list.length, emptyText: "Board is clear" },
+      list.map((c) => h(KanbanCardItem, { key: c.id, card: c }))
     );
   }
+
+  // --- Page -------------------------------------------------------------------
 
   function MissionBoardPage() {
     const { data, error, loading, reload } = useSnapshot();
 
     return h(
       "div",
-      { className: "flex flex-col gap-4 p-4 max-w-3xl mx-auto" },
+      { className: "flex flex-col gap-4 p-4" },
       h(
         "div",
         { className: "flex items-center justify-between" },
         h("h1", { className: "text-lg font-semibold" }, "Mission Board"),
         h(
-          Button,
-          { variant: "outline", size: "sm", onClick: reload },
-          loading ? "Refreshing…" : "Refresh"
+          "div",
+          { className: "flex items-center gap-2" },
+          data && data.generated_at
+            ? h("span", { className: "text-xs text-muted-foreground" }, "Updated " + timeAgo(data.generated_at))
+            : null,
+          h(Button, { variant: "outline", size: "sm", onClick: reload }, loading ? "Refreshing…" : "Refresh")
         )
       ),
       error
         ? h(Card, { className: "border-destructive/40" }, h(CardContent, { className: "py-3 text-sm" }, "Failed to load: " + error))
         : null,
       data ? h(NeedsInputBanner, { snapshot: data }) : null,
-      h(CalendarCard, { events: data ? data.calendar : [] }),
-      h(TodosCard, { todos: data ? data.todos : [] }),
-      h(KanbanCard, { kanban: data ? data.kanban : [] }),
-      data
-        ? h(
-            "div",
-            { className: "text-xs text-muted-foreground text-right" },
-            "Updated " + (data.generated_at ? SDK.utils.timeAgo(data.generated_at) : "just now")
-          )
-        : null
+      h(
+        "div",
+        { className: "flex gap-4 overflow-x-auto pb-2" },
+        h(TodosColumn, { todos: data ? data.todos : [] }),
+        h(CalendarColumn, { events: data ? data.calendar : [] }),
+        h(KanbanColumn, { kanban: data ? data.kanban : [] })
+      )
     );
   }
 

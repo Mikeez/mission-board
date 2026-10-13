@@ -78,6 +78,7 @@ _CACHE_AT = 0.0
 
 TODO_LINE_RE = re.compile(r"^\s*-\s*\[\s\]\s*(.+?)\s*$")
 SECTION_RE = re.compile(r"^#{1,6}\s*(.+?)\s*$")
+DUE_DATE_RE = re.compile(r"\bdue\s+(\d{4}-\d{2}-\d{2})\b", re.I)
 
 
 def _load_todo_age_state() -> Dict[str, float]:
@@ -129,12 +130,31 @@ def get_todos() -> List[Dict[str, Any]]:
             changed = True
         first_seen = age_state[todo_text]
         age_days = max(0.0, (now - first_seen) / 86400.0)
+
+        due_date = None
+        due_match = DUE_DATE_RE.search(todo_text)
+        days_until_due = None
+        overdue = False
+        if due_match:
+            due_date = due_match.group(1)
+            try:
+                import datetime as _dt
+
+                due_dt = _dt.date.fromisoformat(due_date)
+                days_until_due = (due_dt - _dt.date.today()).days
+                overdue = days_until_due < 0
+            except Exception:
+                pass
+
         items.append(
             {
                 "text": todo_text,
                 "section": section or "Today",
                 "age_days": round(age_days, 1),
                 "stale": age_days >= STALE_TODO_DAYS,
+                "due_date": due_date,
+                "days_until_due": days_until_due,
+                "overdue": overdue,
             }
         )
 
@@ -146,7 +166,13 @@ def get_todos() -> List[Dict[str, Any]]:
     if changed:
         _save_todo_age_state(age_state)
 
-    items.sort(key=lambda it: (-it["age_days"]))
+    items.sort(
+        key=lambda it: (
+            not it["overdue"],
+            it["days_until_due"] if it["days_until_due"] is not None else 9999,
+            -it["age_days"],
+        )
+    )
     return items
 
 
@@ -266,7 +292,7 @@ def build_snapshot() -> Dict[str, Any]:
     kanban = get_kanban_cards()
 
     needs_input = [c for c in kanban if c.get("needs_input")]
-    stale_todos = [t for t in todos if t.get("stale")]
+    stale_todos = [t for t in todos if t.get("stale") or t.get("overdue")]
 
     return {
         "generated_at": time.time(),
