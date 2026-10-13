@@ -1,0 +1,9 @@
+name: mission-board
+version: "1.0.0"
+description: >
+  Mission Board — a unified daily dashboard tab for the Hermes web dashboard.
+  Combines today's calendar (via Secretary's Google Calendar access), open
+  Daily Planner to-dos (Obsidian), and open Kanban cards across all Hermes
+  profiles into one glanceable view, with "needs your input" items surfaced
+  first (blocked Kanban cards, to-dos aging 3+ days).
+author: Mikeez

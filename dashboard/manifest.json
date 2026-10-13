@@ -1,0 +1,14 @@
+{
+  "name": "mission-board",
+  "label": "Mission Board",
+  "description": "One view: today's calendar, open to-dos, and open Kanban cards across all Hermes agents. Items needing your input surface first.",
+  "icon": "Zap",
+  "version": "1.0.0",
+  "tab": {
+    "path": "/mission-board",
+    "position": "after:skills"
+  },
+  "entry": "dist/index.js",
+  "css": "dist/style.css",
+  "api": "plugin_api.py"
+}
