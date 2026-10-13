@@ -169,10 +169,12 @@ def get_calendar_events(days_ahead: int = 2) -> List[Dict[str, Any]]:
     env = dict(os.environ)
     env["HERMES_HOME"] = str(SECRETARY_HOME)
 
+    import sys as _sys
+
     try:
         proc = subprocess.run(
             [
-                "python",
+                _sys.executable,
                 str(GOOGLE_API_SCRIPT),
                 "calendar",
                 "list",
