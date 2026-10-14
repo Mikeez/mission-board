@@ -227,7 +227,49 @@ def get_calendar_events(days_ahead: int = 2) -> List[Dict[str, Any]]:
 
     if not isinstance(events, list):
         return []
-    return events
+    return _dedupe_overlapping_events(events)
+
+
+def _dedupe_overlapping_events(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Merge calendar entries that are really the same appointment.
+
+    Mike's calendar often has two separate events for one real appointment
+    (e.g. a personal reminder + a booking-system confirmation) that share the
+    same start time. Rather than showing both as separate cards, merge any
+    events whose start timestamps match exactly into a single card with a
+    combined title, keeping whichever location/description is non-empty.
+    """
+    groups: Dict[str, List[Dict[str, Any]]] = {}
+    order: List[str] = []
+    for ev in events:
+        if not isinstance(ev, dict) or ev.get("error"):
+            continue
+        start = ev.get("start")
+        if isinstance(start, dict):
+            key = start.get("dateTime") or start.get("date") or ""
+        else:
+            key = start or ""
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(ev)
+
+    merged: List[Dict[str, Any]] = []
+    for key in order:
+        group = groups[key]
+        if len(group) == 1:
+            merged.append(group[0])
+            continue
+        titles = [g.get("summary") or g.get("title") or "(untitled)" for g in group]
+        location = next((g.get("location") for g in group if g.get("location")), "")
+        description = next((g.get("description") for g in group if g.get("description")), "")
+        combined = dict(group[0])
+        combined["summary"] = " / ".join(dict.fromkeys(titles))  # dedupe identical titles too
+        combined["location"] = location
+        combined["description"] = description
+        combined["merged_count"] = len(group)
+        merged.append(combined)
+    return merged
 
 
 # ---------------------------------------------------------------------------
