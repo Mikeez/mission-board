@@ -277,6 +277,7 @@ def _dedupe_overlapping_events(events: List[Dict[str, Any]]) -> List[Dict[str, A
 # ---------------------------------------------------------------------------
 
 OPEN_STATUSES = {"todo", "ready", "running", "blocked", "review", "triage", "scheduled"}
+STUCK_RUNNING_SECONDS = 2 * 3600  # flag a 'running' task as possibly stuck after 2h
 
 
 def _read_kanban_db(profile: str, db_path: Path) -> List[Dict[str, Any]]:
@@ -286,7 +287,7 @@ def _read_kanban_db(profile: str, db_path: Path) -> List[Dict[str, Any]]:
         con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=3)
         cur = con.cursor()
         cur.execute(
-            "SELECT id, title, assignee, status, priority, created_at, completed_at "
+            "SELECT id, title, assignee, status, priority, created_at, completed_at, started_at "
             "FROM tasks WHERE status IN ({}) ORDER BY priority DESC, created_at ASC".format(
                 ",".join("?" for _ in OPEN_STATUSES)
             ),
@@ -299,7 +300,13 @@ def _read_kanban_db(profile: str, db_path: Path) -> List[Dict[str, Any]]:
 
     out = []
     for r in rows:
-        task_id, title, assignee, status, priority, created_at, completed_at = r
+        task_id, title, assignee, status, priority, created_at, completed_at, started_at = r
+        stuck = False
+        if status == "running" and started_at:
+            try:
+                stuck = (time.time() - float(started_at)) > STUCK_RUNNING_SECONDS
+            except Exception:
+                stuck = False
         out.append(
             {
                 "id": task_id,
@@ -309,7 +316,8 @@ def _read_kanban_db(profile: str, db_path: Path) -> List[Dict[str, Any]]:
                 "priority": priority,
                 "created_at": created_at,
                 "board_profile": profile,
-                "needs_input": status == "blocked" or status == "review",
+                "needs_input": status == "blocked" or status == "review" or stuck,
+                "stuck": stuck,
             }
         )
     return out
